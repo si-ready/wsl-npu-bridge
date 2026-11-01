@@ -16,9 +16,9 @@ print(npu.chat("Explain tensor cores"))    # LLM on the NPU (+ iGPU decode)
 text = npu.transcribe("standup.wav")       # Whisper, off your CPU entirely
 ```
 
-- **LLM chat** through AMD's *hybrid* execution: the NPU does prompt
-  prefill, the Radeon iGPU does token decode — at a few watts, while
-  your discrete GPU and CPU stay free.
+- **LLM chat** through AMD's *hybrid* execution, which partitions
+  work across the NPU and the Radeon iGPU per phase — at a few watts,
+  while your discrete GPU and CPU stay free.
 - **Speech-to-text** with Whisper backends that probe for the NPU first.
 - **Embeddings**, plus a bench tool that files dated JSON receipts
   (tokens/sec, real-time factor) so "runs on the NPU" is a measurement,
@@ -67,9 +67,12 @@ future WSL release instead of fighting them.
   *discovers* the host: `$WSL_NPU_URL`, then mirrored-mode localhost,
   then the NAT gateway, then the `/etc/resolv.conf` nameserver — so it
   works in both WSL networking modes with zero configuration.
-- A faster, network-free transport (virtio-vsock) is in study; see
-  `docs/ARCHITECTURE.md`. The HTTP baseline stays as the reference
-  implementation either way.
+- Recommended setup is WSL **mirrored** networking (localhost works
+  both ways, the service keeps its loopback-only bind). NAT mode works
+  via gateway discovery, with the caveats in
+  `docs/TROUBLESHOOTING.md`. A network-free virtio-vsock transport is
+  the v0.2 upgrade; the transport/language study behind these choices
+  is summarised in `docs/ARCHITECTURE.md`.
 
 ## Quick start (10 minutes)
 
@@ -128,8 +131,11 @@ dev server.
 
 - **v0.1** — HTTP bridge, hybrid LLM + Whisper + embeddings, receipts. *(now)*
 - **v0.2** — virtio-vsock transport: no IP networking, no firewall,
-  lower latency two-way streaming (guest side is already proven —
-  `/dev/vsock` is present and openable in current WSL2 kernels).
+  two-way gRPC streaming (guest side is already proven — `/dev/vsock`
+  is present and openable in current WSL2 kernels; the study's verdict
+  is that transports here are chosen for reliability and clean
+  cancellation, since inference time dwarfs wire time by orders of
+  magnitude).
 - **v0.3** — Rust data-plane daemon for the vsock channel, token
   streaming first-class; Elixir control plane evaluated for
   many-session orchestration (see the architecture study).

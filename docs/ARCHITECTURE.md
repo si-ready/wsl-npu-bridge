@@ -20,12 +20,14 @@ Every design decision below is downstream of that split.
 
 ## Execution: hybrid is the interesting part
 
-AMD's "hybrid" models split one inference across two engines:
-
-- **Prefill on the NPU.** Prompt processing is dense matrix work —
-  exactly what XDNA's spatial array is built for, at a few watts.
-- **Decode on the iGPU.** Token generation is memory-bound; the Radeon
-  890M's access to the shared LPDDR5X pool wins there.
+AMD's "hybrid" models split one inference across two engines. The
+popular shorthand — *NPU does prefill, iGPU does decode* — is
+Lemonade's simplification; AMD's own description is that the runtime
+**partitions layers and operations across the NPU and iGPU per
+phase**, with the NPU carrying the compute-dense work it is built for
+at a few watts and the iGPU carrying the memory-bound work where its
+access to the shared LPDDR5X pool wins. The engineering consequences
+for the bridge are the same either way:
 
 For WSL workloads this split is the whole point: a long prompt (a file,
 a repo, a transcript) gets ingested by the NPU, the token stream flows
@@ -35,20 +37,55 @@ inference channel while the machine's big silicon does other work.
 
 ## Transports, in order of preference
 
-### 1. HTTP over the WSL virtual network (v0.1, baseline)
+A transport/language study (November 2026, primary sources) settled
+the ordering below. Its headline finding disciplines all of it:
+**the wire is never the bottleneck.** Hybrid inference on this class
+of hardware spends ~1–5 s in time-to-first-token and ~50 ms per token;
+every candidate transport moves a token in under 1 ms, and the fattest
+payload (streaming audio, ~5 MB/s) is trivial for all of them.
+Transports are therefore chosen for **reliability and clean
+cancellation**, not speed.
 
-The host service (Lemonade, OpenAI-compatible API, port 13305) bound
-beyond loopback; the guest client discovers the host address
-(mirrored-mode localhost, NAT gateway, or the resolv.conf nameserver).
+### 1. Mirrored-mode localhost TCP (recommended baseline)
 
-- *Strengths:* zero new code on the host, every tool already speaks it,
-  works today.
-- *Weaknesses:* NAT mode needs the bind + firewall cooperation;
-  per-request HTTP overhead is real but irrelevant next to inference
-  time for chat — it matters more for high-rate small calls
-  (embeddings, realtime audio chunks).
+With `networkingMode=mirrored` in `.wslconfig`, Microsoft documents
+`127.0.0.1` working in both directions between host and guest. The
+host service binds loopback (its vendor default — the most secure
+posture), the guest client just dials localhost, and NAT's per-boot
+gateway addresses, wide binds, and LAN exposure all disappear.
 
-### 2. Reverse relay (fallback when the firewall says no)
+### 2. virtio-vsock / Hyper-V sockets (v0.2 upgrade)
+
+WSL2's kernel already carries virtio-vsock: `/dev/vsock` is present
+and an `AF_VSOCK` socket can be opened from Python today (verified on
+the reference machine, kernel 6.18.54.1-microsoft-standard-WSL2,
+`CONFIG_VSOCKETS=y`). Microsoft officially supports third-party
+host↔guest socket apps: the guest dials CID 2; the Windows side
+listens on `AF_HYPERV` with {VmId, ServiceId} GUIDs. A vsock channel
+gives no IP networking at all (no firewall in the path), pipe-like
+latency, and a natural fit for bidirectional streaming.
+
+Known friction, reported honestly because the field evidence
+conflicts: some setups must register the service GUID in the registry
+as admin; at least one production WSL2 app (X410) reportedly works
+with no registration; another (VcXsrv) found a wildcard VmId bind
+never matches the WSL2 utility VM — it needs the specific VmId, which
+changes every WSL restart but is discoverable **without elevation**
+via `wslinfo --vm-id`. The Windows-side listener is hand-wired Winsock
+through the `windows` crate (there is no tokio-vsock for AF_HYPERV);
+sizing that work is an explicit open item, to be answered by a spike,
+not by optimism.
+
+### 3. NAT-mode gateway TCP (fallback)
+
+The v0.1 bring-up path: service bound beyond loopback, client
+discovers the gateway/resolv.conf host address. It works, but it is
+the fragile option — per-boot addresses, a bind the daemon must
+actually honour, firewall cooperation, and an unauthenticated API
+exposed on the LAN unless keyed. Kept because some machines can't
+switch networking modes; documented, not recommended.
+
+### 4. Reverse relay (fallback when the firewall says no)
 
 If inbound-to-Windows is blocked and no admin is available, reverse
 the direction: the host dials *out* into the guest (outbound is
@@ -56,63 +93,77 @@ default-allowed) and forwards the loopback service through that
 connection. The guest sees a local listener; the service never leaves
 host loopback. Same API, slightly more moving parts.
 
-### 3. virtio-vsock (v0.2, in study)
+**Rejected with evidence:** Windows named pipes from WSL2 (the pipe
+namespace is hidden; only relay hacks exist), Windows `AF_UNIX`
+sockets from WSL2 (maintainer-documented as not working with WSL2
+VMs), QUIC (no loss to fix on a local link, userspace CPU cost, and
+it cannot run over hv_sock), and **shared memory** (no general
+third-party mechanism exists — the GPU gets one via dxg by
+Microsoft's grace; any design that needs it waits on Microsoft).
 
-WSL2's kernel already carries virtio-vsock: `/dev/vsock` is present
-and an `AF_VSOCK` socket can be opened from Python today (verified on
-the reference machine, kernel 6.18.54.1-microsoft-standard-WSL2,
-`CONFIG_VSOCKETS=y`). A vsock channel would give:
+## Protocol
 
-- no IP networking at all — no NAT gateway, no bind addresses,
-  **no firewall in the path**,
-- stream semantics with latency closer to a pipe than a network,
-- a natural fit for bidirectional streaming: prompts and audio chunks
-  up, token deltas down, control frames both ways.
+- **Internal channel (v0.2): gRPC bidirectional streaming** (tonic).
+  It wins on single-connection cancellation, interleaving, and HTTP/2
+  flow control — not on bytes. The real latency risk in any of these
+  stacks is flush/Nagle/batching discipline, not protocol overhead.
+- **Compatibility surface (kept):** the OpenAI-style HTTP + SSE API,
+  because the upstream host service speaks it and every tool already
+  understands it. Lemonade streams tokens incrementally over SSE, and
+  exposes a WebSocket `/realtime` endpoint for audio.
+- WebSocket is reserved for browser/Phoenix-style consumers.
 
-The open half is the host pairing: the guest speaks virtio-vsock while
-Windows listeners use Hyper-V sockets (`AF_HYPERV`), and WSL2 bridges
-the two — the exact service-GUID/VM-ID mechanics for third-party apps
-are what the transport study (running alongside this build) is
-verifying from primary sources before code depends on them.
-
-**Shared memory** across the boundary was considered and rejected:
-no general mechanism is available to third parties (the GPU gets one
-via dxg by Microsoft's grace; nothing equivalent exists for arbitrary
-processes). Any design that needs it is a design that waits on
-Microsoft.
-
-## Language mix (design position, study in progress)
+## Language mix (study verdict)
 
 The bridge has three layers with different physics; they don't want
-the same language.
+the same language. The study confirmed the mix below, with evidence:
 
 | Layer | Job | Choice | Why |
 |---|---|---|---|
-| Host data plane | vsock listener, framing, streaming to/from the runtimes | **Rust** (Tokio) | C++-class performance for IO-bound streaming, memory safety, one codebase cross-compiles the Windows daemon and the Linux client, `windows-rs` for service/device APIs, PyO3 if the Python client wants a native core |
-| Native interop shim | Only if a runtime must be driven in-process (custom ORT execution provider, zero-copy ring buffers) | **C++**, surgically | The one place its cost is buying something real; kept behind a narrow C ABI so it can be replaced |
-| Control plane | Sessions, routing, retries, many concurrent streams, observability | **Elixir/BEAM** (candidate) | Supervision trees and per-session processes are the best tool in the industry for "thousands of two-way streams that must not die"; a Rust NIF (Rustler) keeps the hot path native. Wrong tool for per-tensor work; right tool for everything around it |
-| Guest client (today) | Discovery + API for any WSL program | **Python, stdlib only** | Zero-install is a feature; it stays the public face regardless of what the data plane becomes |
+| Host + guest daemons | vsock/TCP listeners, framing, streaming to/from the runtimes | **Rust** (Tokio, axum/tonic) | One workspace and one `.proto` for both sides of the VM boundary; IOCP-class IO on Windows; the `windows` crate covers service + AF_HYPERV APIs; PyO3 available if the Python client wants a native core later |
+| Native interop adapter | Only if a runtime is driven in-process (AMD calls the ONNX Runtime GenAI C++/Python API "the lowest-level API" for hybrid mode) | **C++**, surgically, or Python for the prototype | The one place C++ buys something real. For the daemon itself it is cargo cult — the daemon's IO ceiling is already reached by Rust |
+| Control plane | Sessions, routing, retries, many concurrent streams, observability | **Elixir/BEAM** — *optional, Linux-side only, only if multi-session orchestration actually emerges* | Supervision trees, Phoenix Channels, and GenStage/Broadway demand-driven backpressure are superb for many two-way streams. It is the wrong tool for the Windows host daemon (packaging/deployment friction) and for anything per-token. Measured Rustler data sets the rule if it is ever used: a NIF call costs ~62 µs on a dirty scheduler vs ~9 µs in-process at 1 KB, so a NIF must own a whole stream or batch, never a per-token call |
+| Guest client (today) | Discovery + API for any WSL program | **Python, stdlib only** | Zero-install is a feature; it stays the public face regardless of what the data plane becomes. gRPC stubs first if it grows; not the daemon (GIL, Windows-service packaging) |
 
-Go is the credible single-language alternative for the data plane
-(simpler, slightly softer latency tail); Python alone was rejected for
-the daemon role (GIL, deployment weight) but kept for the client,
-where its job is discovery and JSON, not throughput.
+Go is the defensible full substitute for the daemons (faster
+development velocity, small measured proxy overhead) if Rust velocity
+ever becomes the actual constraint — that is a team call, not a
+performance one.
 
-A formal transport/language study with sourced measurements is being
-run against this position; this document will be revised by its
-findings, and the deltas recorded here, before v0.2 code is written.
+## Serialization (study verdict)
 
-## Serialization
+- **Protocol Buffers everywhere internally.** Token streams and
+  control frames as protobuf messages; differences vs FlatBuffers are
+  microseconds — five orders of magnitude below the token interval.
+- **Embeddings and audio ride as `bytes` fields** holding raw
+  little-endian float32 / opaque audio. That reaches the zero-copy
+  end-state (numpy `frombuffer`, Rust `bytemuck`) without paying
+  FlatBuffers complexity. JSON carries vectors at 2–4× the bytes and
+  stays only on the compatibility surface.
+- FlatBuffers second, Cap'n Proto third (weakest Rust/Windows
+  fit), Apache Arrow rejected for single-vector wire use (columnar
+  IPC pays only for bulk multi-column batches).
+- Zero-copy itself matters **nowhere** in this design: every payload
+  is produced once, sent once, consumed once, and the single cross-VM
+  copy is unavoidable and costs microseconds at ≤5 MB/s.
 
-- Token streams and control: JSON today (the upstream API is JSON);
-  Protocol Buffers when the vsock protocol lands — small frames,
-  streaming-friendly, every candidate language has first-class support.
-- Audio chunks (16–100 KB, tens/sec): raw bytes with a length prefix;
-  transcoding to a columnar format (Arrow) buys nothing at this size.
-- Embedding vectors (768–4096 × float32): raw little-endian bytes in
-  the vsock protocol; JSON arrays of floats are ~4× the bytes and
-  measurably slower to parse — the one place the baseline HTTP path
-  pays real overhead, and a receipt in `bench/` shows it.
+## What the study could not verify (measure locally, don't assume)
+
+- No published mirrored-vs-NAT localhost latency/throughput exists.
+- No WSL2-specific vsock latency/throughput; the only figures are
+  second-hand generic Hyper-V socket numbers.
+- No independent HX 370 hybrid-mode benchmarks — only AMD's
+  pre-release numbers (8B: TTFT 0.94 s @128 tokens → 5.01 s @2048,
+  ~18–21 tok/s; 1.5B: up to ~67 tok/s). The widely quoted "NPU 2.3×"
+  figures are Strix Halo measurements and are contradicted by another
+  Halo test — never transfer them to this chip.
+- Per-token SSE granularity and concurrent model co-residency in the
+  host service; audio rates over `/realtime` from WSL; BEAM
+  token-forwarding jitter; mirrored-mode stability alongside the
+  machine's VPN/AV stack.
+
+These are the bench tool's roadmap: `bench/` exists to replace every
+item on this list with a dated local receipt.
 
 ## Failure philosophy
 
