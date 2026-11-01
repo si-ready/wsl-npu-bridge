@@ -1,0 +1,20 @@
+{
+  "when_utc": "2026-11-01T23:44:26+00:00",
+  "bridge_base_url": "http://127.0.0.1:13305",
+  "runs": {
+    "chat": {
+      "error": "HTTP Error 500: Internal Server Error"
+    },
+    "whisper": {
+      "wav": "/mnt/c/Users/casey/AppData/Local/wsl-npu-bridge/bench-sample.wav",
+      "wall_s": 9.919,
+      "audio_s": 4351.799455782313,
+      "rtf": 438.72,
+      "text": " The quick brown fox jumps over the lazy dog.\n This recording tests the whisper transcription path of the\n WSL NPU bridge.\n"
+    },
+    "embed": {
+      "dims": 768,
+      "wall_s": 72.882
+    }
+  }
+}

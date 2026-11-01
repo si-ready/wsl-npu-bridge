@@ -42,15 +42,14 @@ DEFAULT_WAV_WINDOWS = Path(
 
 
 def wav_duration_seconds(path: Path) -> float | None:
-    """Duration of a PCM WAV from its header; None if not parseable."""
+    """Duration of a WAV via the stdlib wave module (it walks the chunk
+    list properly -- a fixed-offset header read once reported 4,351 s
+    for a 12 s clip because the writer had inserted extra chunks)."""
     try:
-        data = path.read_bytes()[:64]
-        if data[:4] != b"RIFF" or data[8:12] != b"WAVE":
-            return None
-        byte_rate = struct.unpack("<I", data[28:32])[0]
-        # data chunk size lives at offset 40 in a canonical PCM WAV.
-        data_size = struct.unpack("<I", data[40:44])[0]
-        return data_size / byte_rate if byte_rate else None
+        import wave
+        with wave.open(str(path), "rb") as w:
+            rate = w.getframerate()
+            return w.getnframes() / rate if rate else None
     except Exception:
         return None
 
@@ -88,12 +87,18 @@ def main() -> int:
     print(f"bridge endpoint: {npu.base_url}")
 
     # -- chat: the headline number --------------------------------------
-    chat = npu.chat_timed(args.prompt)
-    receipt["runs"]["chat"] = chat
-    print(f"\nchat   model={chat['model']}")
-    print(f"       {chat['completion_tokens']} tokens in {chat['wall_s']} s "
-          f"= {chat['tokens_per_s']} tok/s (incl. prefill)")
-    print(f"       reply starts: {chat['text'][:80]!r}")
+    # A failed leg is a receipt too: record it and keep going, so one
+    # broken backend never hides the legs that work.
+    try:
+        chat = npu.chat_timed(args.prompt)
+        receipt["runs"]["chat"] = chat
+        print(f"\nchat   model={chat['model']}")
+        print(f"       {chat['completion_tokens']} tokens in {chat['wall_s']} s "
+              f"= {chat['tokens_per_s']} tok/s (incl. prefill)")
+        print(f"       reply starts: {chat['text'][:80]!r}")
+    except Exception as exc:
+        receipt["runs"]["chat"] = {"error": str(exc)}
+        print(f"\nchat   FAILED: {exc}")
 
     # -- whisper ---------------------------------------------------------
     if not args.skip_whisper:
@@ -101,17 +106,23 @@ def main() -> int:
         if wav and wav.exists():
             seconds = args.audio_seconds or wav_duration_seconds(wav)
             start = time.perf_counter()
-            text = npu.transcribe(wav)
+            try:
+                text = npu.transcribe(wav)
+            except Exception as exc:
+                receipt["runs"]["whisper"] = {"error": str(exc)}
+                print(f"\nwhisper  FAILED: {exc}")
+                text = None
             wall = time.perf_counter() - start
-            run = {"wav": str(wav), "wall_s": round(wall, 3),
-                   "audio_s": seconds,
-                   "rtf": round(seconds / wall, 2) if seconds else None,
-                   "text": text}
-            receipt["runs"]["whisper"] = run
-            print(f"\nwhisper  {seconds:.1f} s of audio in {wall:.2f} s "
-                  f"= RTF {run['rtf']}x" if seconds else
-                  f"\nwhisper  transcribed in {wall:.2f} s (duration unknown)")
-            print(f"       text: {text[:100]!r}")
+            if text is not None:
+                run = {"wav": str(wav), "wall_s": round(wall, 3),
+                       "audio_s": seconds,
+                       "rtf": round(seconds / wall, 2) if seconds else None,
+                       "text": text}
+                receipt["runs"]["whisper"] = run
+                print(f"\nwhisper  {seconds:.1f} s of audio in {wall:.2f} s "
+                      f"= RTF {run['rtf']}x" if seconds else
+                      f"\nwhisper  transcribed in {wall:.2f} s (duration unknown)")
+                print(f"       text: {text[:100]!r}")
         else:
             print("\nwhisper  skipped: no bench WAV found "
                   "(run host/install.ps1, or pass --wav)")

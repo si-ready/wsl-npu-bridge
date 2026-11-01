@@ -37,6 +37,16 @@ inference channel while the machine's big silicon does other work.
 
 ## Transports, in order of preference
 
+**As built (v0.1):** the reverse relay (§4 below) is what ships,
+because on the reference machine the NAT route (§3) was eaten by the
+Windows Firewall and mirrored mode (§1) asks for a WSL configuration
+change the bridge shouldn't demand. The relay needs nothing from the
+user or the OS, keeps both services loopback-only, and measured
+indistinguishable from direct for this workload — which the study's
+headline finding below predicts. The ranking stands as the design
+order for v0.2; the relay is the pragmatic v0.1 baseline, and the
+client still discovers direct endpoints when they exist.
+
 A transport/language study (November 2026, primary sources) settled
 the ordering below. Its headline finding disciplines all of it:
 **the wire is never the bottleneck.** Hybrid inference on this class

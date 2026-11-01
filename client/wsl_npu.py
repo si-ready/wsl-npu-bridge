@@ -60,6 +60,11 @@ API_PREFIX = "/api/v1"
 DEFAULT_LLM = os.environ.get("WSL_NPU_LLM", "Llama-3.2-1B-Instruct-Hybrid")
 DEFAULT_STT = os.environ.get("WSL_NPU_STT", "Whisper-Large-v3-Turbo")
 DEFAULT_EMBED = os.environ.get("WSL_NPU_EMBED", "nomic-embed-text-v1-GGUF")
+# FastFlowLM runs as a companion service in v0.1 (lemond's own FLM
+# discovery is broken in current builds -- see docs/TROUBLESHOOTING.md).
+# serve.ps1 relays it into WSL on this port; it is a standard
+# OpenAI-compatible endpoint, usable with any OpenAI client.
+DEFAULT_FLM_URL = os.environ.get("WSL_NPU_FLM_URL", "http://127.0.0.1:53999")
 
 
 class NPUUnavailable(RuntimeError):
@@ -227,6 +232,16 @@ def _doctor() -> int:
             for wanted in (DEFAULT_LLM, DEFAULT_STT, DEFAULT_EMBED):
                 mark = "ready" if wanted in npu_models else "not pulled yet"
                 print(f"      {wanted}: {mark}")
+            # FLM companion service: a note, never a failure.
+            try:
+                req = urllib.request.Request(f"{DEFAULT_FLM_URL}/v1/models")
+                with urllib.request.urlopen(req, timeout=4) as resp:
+                    count = len(json.loads(resp.read()).get("data", []))
+                print(f"  [OK ] FLM companion at {DEFAULT_FLM_URL} "
+                      f"({count} models listed)")
+            except Exception:
+                print(f"  [  -] FLM companion at {DEFAULT_FLM_URL} "
+                      f"(not running)")
             return 0
     print("  No endpoint answered -- see the host instructions in README.md")
     return 1

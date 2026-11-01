@@ -24,8 +24,11 @@ text = npu.transcribe("standup.wav")       # Whisper, off your CPU entirely
   (tokens/sec, real-time factor) so "runs on the NPU" is a measurement,
   not a claim.
 
-Status: **v0.1 in active bring-up.** Verified end-to-end on an ASUS
-ProArt PX13 (Ryzen AI 9 HX 370). Receipts live in `bench/results/`.
+Status: **v0.1.** Verified end-to-end on an ASUS ProArt PX13
+(Ryzen AI 9 HX 370, Windows 11 build 26300, WSL2 NAT mode).
+Receipts live in `bench/results/`; the measured results — including
+the two upstream defects that shape this release — are in
+[Measured results](#measured-results-reference-machine) below.
 
 ---
 
@@ -51,28 +54,36 @@ future WSL release instead of fighting them.
 
 ```
   WSL2 (Linux)                              Windows host
- ┌────────────────────┐                    ┌──────────────────────────┐
- │ your code          │                    │ Lemonade daemon (lemond) │
- │   │                │   OpenAI-style     │   ├─ FastFlowLM backend  │──► XDNA NPU
- │ client/wsl_npu.py  │──── HTTP API ─────►│   ├─ Ryzen AI (OGA)      │──► NPU prefill
- │ (stdlib only)      │   tokens stream    │   └─ whisper.cpp         │──► iGPU decode
- └────────────────────┘      back           └──────────────────────────┘
+ ┌────────────────────┐                    ┌───────────────────────────┐
+ │ your code          │  127.0.0.1:13305   │ Lemonade daemon (lemond)  │
+ │   │                │◄── SSH reverse ───►│   ├─ Ryzen AI (OGA hybrid)│─► NPU + iGPU
+ │ client/wsl_npu.py  │     relay (host    │   ├─ whisper.cpp (NPU)    │─► NPU
+ │ (stdlib only)      │     dials OUT)     │   └─ llama.cpp (embed)    │─► CPU/GPU
+ │                    │  127.0.0.1:53999   │ FastFlowLM (flm serve)    │─► NPU
+ │ any OpenAI client  │◄── SSH reverse ───►│   companion service       │
+ └────────────────────┘     relay          └───────────────────────────┘
 ```
 
 - The host runs AMD's [Lemonade](https://github.com/lemonade-sdk/lemonade)
-  server (Apache-2.0), which drives the XDNA NPU through its FastFlowLM
-  and Ryzen AI backends. This repo's host scripts install it pinned and
+  server (Apache-2.0), which drives the XDNA NPU through its Ryzen AI
+  and whisper.cpp backends, plus a FastFlowLM companion service.
+  This repo's host scripts install everything pinned and
   hash-verified, user-locally — no admin, no MSI.
-- The WSL client is one Python file, standard library only. It
-  *discovers* the host: `$WSL_NPU_URL`, then mirrored-mode localhost,
-  then the NAT gateway, then the `/etc/resolv.conf` nameserver — so it
-  works in both WSL networking modes with zero configuration.
-- Recommended setup is WSL **mirrored** networking (localhost works
-  both ways, the service keeps its loopback-only bind). NAT mode works
-  via gateway discovery, with the caveats in
-  `docs/TROUBLESHOOTING.md`. A network-free virtio-vsock transport is
-  the v0.2 upgrade; the transport/language study behind these choices
-  is summarised in `docs/ARCHITECTURE.md`.
+- **The transport is an SSH reverse relay.** Windows Firewall silently
+  drops inbound WSL→host connections to user processes, and fixing
+  that needs an admin rule — so the host dials *out* into WSL over the
+  sshd that is already there, and forwards the loopback services back
+  through the tunnel. Zero firewall rules, zero admin, and the
+  unauthenticated APIs keep loopback-only binds (never LAN-exposed).
+  A dedicated, tightly restricted SSH key (single `authorized_keys`
+  line, forwarding-only) is generated for this; see `host/relay.ps1`.
+- The WSL client is one Python file, standard library only. In relay
+  mode the host is simply `127.0.0.1` inside WSL; direct endpoint
+  discovery (`$WSL_NPU_URL`, mirrored localhost, NAT gateway,
+  resolv.conf nameserver) remains as a fallback for setups that
+  prefer it. Mirrored networking mode makes the relay unnecessary —
+  see `docs/ARCHITECTURE.md`, which also records the transport study
+  behind these choices and the v0.2 virtio-vsock plan.
 
 ## Quick start (10 minutes)
 
@@ -81,18 +92,37 @@ future WSL release instead of fighting them.
 ```powershell
 git clone https://github.com/si-ready/wsl-npu-bridge
 cd wsl-npu-bridge
-powershell -ExecutionPolicy Bypass -File host\install.ps1   # checks NPU+driver, installs, pulls models
-powershell -ExecutionPolicy Bypass -File host\serve.ps1     # starts the service, waits until it answers
+powershell -ExecutionPolicy Bypass -File host\install.ps1   # checks NPU+driver, installs backends + models
+powershell -ExecutionPolicy Bypass -File host\serve.ps1     # starts services + relays; stops and says so if the one-time WSL step below is still owed
 ```
 
-**2. In WSL2:**
+**2. In WSL2 (once):**
 
 ```bash
-python3 client/wsl_npu.py doctor        # finds the host, checks model readiness
-python3 client/wsl_npu.py chat "Write a haiku about a tugboat"
+bash wsl/authorize-relay.sh             # authorizes the bridge's restricted relay key
+```
+
+Then re-run `host\serve.ps1` on Windows (or `host\relay.ps1` if the
+services are already up), and:
+
+```bash
+python3 client/wsl_npu.py doctor        # checks both endpoints + model readiness
 python3 client/wsl_npu.py transcribe some-audio.wav
 python3 bench/bench_npu.py              # numbers + a filed JSON receipt
 ```
+
+LLM chat works two ways in v0.1:
+
+- **Via FastFlowLM** (the path verified end-to-end): the FLM
+  companion endpoint at `http://127.0.0.1:53999` is a standard
+  OpenAI-compatible API — point any OpenAI client at it, model
+  `llama3.2:1b`.
+- **Via Lemonade hybrid models** (`client/wsl_npu.py chat …`):
+  works when the machine's Windows ML / ONNX Runtime stack cooperates;
+  on the reference machine's Windows build it currently does not —
+  see Measured results. This is an upstream defect, not a bridge one,
+  and the bridge is structured so the fix lights the path up with no
+  changes here.
 
 Defaults: LLM `Llama-3.2-1B-Instruct-Hybrid` (NPU+iGPU), STT
 `Whisper-Large-v3-Turbo`, embeddings `nomic-embed-text-v1-GGUF`.
@@ -107,22 +137,58 @@ away on the host.
 - AMD NPU driver 32.0.203.314 or newer recommended
   (`install.ps1` checks and warns)
 
+## Measured results (reference machine)
+
+ASUS ProArt PX13, Ryzen AI 9 HX 370, 32 GB, NPU driver 32.0.203.314,
+2026-11-01. Full receipts in `bench/results/`.
+
+| Path | Result |
+|---|---|
+| Whisper Large v3 Turbo, from WSL | **Works.** 9.0 s clip transcribed in 5.75 s warm (32 s cold, incl. model load); transcript word-perfect |
+| Embeddings (nomic-embed-text-v1, 768 d), from WSL | **Works.** 72.9 s cold (includes lemond auto-pulling the model and auto-installing its backend); warm calls are milliseconds-to-seconds |
+| LLM chat via FastFlowLM (`llama3.2:1b`), from WSL | **Works.** Prefill 103 tok/s (TTFT 0.49 s on a 51-token prompt), decode **55.1 tok/s**, 2.30 s end-to-end |
+| LLM chat via Lemonade hybrid (`Llama-3.2-1B-Instruct-Hybrid`) | **Broken by an upstream defect on this Windows build** — details below |
+
+Two defects found during bring-up, both upstream of this repo, both
+documented with evidence in `docs/TROUBLESHOOTING.md`:
+
+1. **RyzenAI-Server cannot start on Windows build 26300**: its
+   bundled ONNX Runtime 1.23.2 is shadowed by the Windows inbox
+   ONNX Runtime 1.17.1, and the server dies with *"The requested
+   API version [23] is not available… Current ORT Version is:
+   1.17.1"*. Machines whose Windows ML runtime is newer may not hit
+   this; the hybrid path needs no bridge changes when it heals.
+2. **Lemonade's FLM model discovery fails** in the 2026.44.1
+   embeddable build (JSON parse error on `flm list --json` output),
+   so FLM models can't be served *through* lemond yet — hence the
+   companion `flm serve` in v0.1.
+
+Also disclosed: the first bench receipt
+(`bench-20261101-144554.json`) reports a nonsense Whisper RTF of
+438× — that was a bug in this repo's own WAV-duration parser (fixed;
+the corrected receipt is `bench-20261101-144635.json`). The receipt
+is kept, not deleted: a wrong number with a correction trail beats a
+quiet edit.
+
 ## Security note
 
-The host API has **no authentication by default**, and `serve.ps1`
-binds it beyond loopback so NAT-mode WSL can reach it. On a network you
-don't trust, set a Lemonade API key (`lemonade config`) or restrict the
-bind — details in `docs/TROUBLESHOOTING.md`. Treat it like any local
-dev server.
+The host APIs have **no authentication**, and the design keeps them
+that way *safely*: both services bind Windows loopback only, and the
+only way in from WSL is the relay, which rides an SSH key restricted
+to exactly those two forwards (no shell, no other ports). Nothing is
+exposed on the LAN. If you reconfigure a service to bind beyond
+loopback (the NAT-direct fallback), set a Lemonade API key first —
+see `docs/TROUBLESHOOTING.md`.
 
 ## Layout
 
 | Path | What it is |
 |---|---|
 | `client/wsl_npu.py` | The WSL-side client library + CLI (stdlib only) |
-| `host/install.ps1` | One-time host setup: hardware gate, pinned install, models |
-| `host/serve.ps1` | Start/stop the host service with a readiness gate |
-| `host/diag.ps1` | Read-only diagnostics when the two sides can't talk |
+| `host/install.ps1` | One-time host setup: hardware gate, pinned install, backends, models |
+| `host/serve.ps1` | Start/stop the whole stack (services first, verified, then relays) |
+| `host/relay.ps1` | The SSH reverse relays + the dedicated restricted key |
+| `wsl/authorize-relay.sh` | One-time WSL-side authorization of that key (convergent, idempotent) |
 | `bench/bench_npu.py` | End-to-end benchmarks that file JSON receipts |
 | `docs/ARCHITECTURE.md` | Layers, transports, and the language-mix design |
 | `docs/TROUBLESHOOTING.md` | The failure modes we've actually hit, and fixes |

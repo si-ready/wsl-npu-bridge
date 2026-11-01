@@ -1,63 +1,96 @@
-# serve.ps1 -- start (or restart) the host side of the WSL2 NPU bridge.
+# serve.ps1 -- start (or stop) the host side of the WSL2 NPU bridge.
 #
-# Starts AMD's Lemonade daemon (lemond.exe), which serves an
-# OpenAI-compatible API on port 13305 and drives the XDNA NPU through
-# its FastFlowLM / Ryzen AI backends. WSL2 programs reach it through
-# the client in client\wsl_npu.py, which auto-discovers this endpoint
-# (mirrored-mode localhost, or the NAT gateway address).
+# The proven bring-up sequence (learned the hard way; see
+# docs/TROUBLESHOOTING.md for the failure that taught each step):
+#
+#   1. Start ONE lemond, loopback-only bind, with its logs captured.
+#      Never start a second one against a wedged port, and never trust
+#      a start you have not verified.
+#   2. Verify lemond answers on host loopback BEFORE anything else.
+#   3. Start flm serve for the FastFlowLM model (a companion service;
+#      lemond's own FLM discovery is broken in current builds -- see
+#      TROUBLESHOOTING). FLM is pinned to port 53999: its default
+#      52625 failed to bind on the reference machine (WSAEACCES).
+#   4. Start the SSH reverse relays (relay.ps1), which carry both
+#      ports into WSL over an outbound connection -- no firewall
+#      rules, no admin, and both services keep loopback-only binds.
+#
+#   powershell -ExecutionPolicy Bypass -File serve.ps1
+#   powershell -ExecutionPolicy Bypass -File serve.ps1 -Stop
 #
 # Pure ASCII on purpose (PowerShell 5.1 ANSI trap -- see install.ps1).
-#
-#   powershell -ExecutionPolicy Bypass -File serve.ps1           # start
-#   powershell -ExecutionPolicy Bypass -File serve.ps1 -Stop     # stop
 
-param([switch]$Stop)
+param([switch]$Stop, [string]$FlmModel = "llama3.2:1b")
 
 $ErrorActionPreference = "Stop"
-$LemonadeVersion = "2026.44.1"
 $Root = Join-Path $env:LOCALAPPDATA "wsl-npu-bridge"
-$BinDir = Join-Path $Root "lemonade\lemonade-embeddable-$LemonadeVersion-windows-x64"
-$Lemond = Join-Path $BinDir "lemond.exe"
-$Port = 13305
+$Bin = Join-Path $Root "lemonade\lemonade-embeddable-2026.44.1-windows-x64"
+$LogDir = Join-Path $Root "logs"
+$FlmPort = 53999
 
-$running = Get-Process lemond -ErrorAction SilentlyContinue
 if ($Stop) {
-    if ($running) { $running | Stop-Process; Write-Host "lemond stopped." }
-    else { Write-Host "lemond is not running." }
+    foreach ($n in @("lemond", "lemonade", "flm", "ryzenai-server", "whisper-server")) {
+        Stop-Process -Name $n -Force -ErrorAction SilentlyContinue
+    }
+    Get-CimInstance Win32_Process -Filter "Name='ssh.exe'" |
+        Where-Object { $_.CommandLine -match "bridge_key" } |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+    Write-Host "bridge stopped."
     return
 }
-if (-not (Test-Path $Lemond)) {
-    throw "lemond.exe not found at $Lemond -- run host\install.ps1 first."
+
+New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+
+# Start from a clean slate: a half-dead lemond holding the port is the
+# single most confusing state this stack has, so it is made impossible
+# here rather than debugged later. Old relays go too -- a stale relay
+# holds the WSL-side listener and the new one would fail to bind it.
+foreach ($n in @("lemond", "flm")) {
+    Stop-Process -Name $n -Force -ErrorAction SilentlyContinue
 }
-if ($running) {
-    Write-Host "lemond already running (PID $($running.Id)). Use -Stop first to restart."
-    return
-}
+Get-CimInstance Win32_Process -Filter "Name='ssh.exe'" |
+    Where-Object { $_.CommandLine -match "bridge_key" } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+Start-Sleep -Seconds 2
 
-# WSL reachability: lemond defaults to binding "localhost" only, which
-# a NAT-mode WSL guest cannot reach at all (its 127.0.0.1 is itself, and
-# the host's loopback is not routed). Binding 0.0.0.0 makes the API
-# reachable from the WSL gateway address. This exposes the API on the
-# machine's LAN interfaces too -- it has no auth by default, so only do
-# this on networks you trust, or set a Lemonade API key. Idempotent.
-$LemonadeCli = Join-Path $BinDir "lemonade.exe"
-if (Test-Path $LemonadeCli) { & $LemonadeCli config set host=0.0.0.0 | Out-Null }
-
-$logDir = Join-Path $Root "logs"
-New-Item -ItemType Directory -Force -Path $logDir | Out-Null
-$proc = Start-Process -FilePath $Lemond -PassThru -WindowStyle Hidden `
-    -RedirectStandardOutput (Join-Path $logDir "lemond.out.log") `
-    -RedirectStandardError (Join-Path $logDir "lemond.err.log")
-Write-Host "lemond started (PID $($proc.Id)). Waiting for the API..."
-
-# Readiness gate: poll the model list until the daemon answers, so the
-# caller never has to guess whether the service is actually up.
-for ($i = 0; $i -lt 30; $i++) {
+# 1-2. lemond, verified host-local.
+$lemond = Join-Path $Bin "lemond.exe"
+if (-not (Test-Path $lemond)) { throw "lemond not found -- run host\install.ps1 first." }
+Start-Process -FilePath $lemond -ArgumentList "--host","localhost" `
+    -WindowStyle Hidden `
+    -RedirectStandardOutput (Join-Path $LogDir "lemond.out.log") `
+    -RedirectStandardError (Join-Path $LogDir "lemond.err.log")
+$ok = $false
+for ($i = 0; $i -lt 15; $i++) {
+    Start-Sleep -Seconds 4
     try {
-        $r = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/api/v1/models" -TimeoutSec 2
-        Write-Host "API is up on port $Port. Models known: $($r.data.Count)"
-        Write-Host "From WSL, verify with:  python3 client\wsl_npu.py doctor"
-        return
-    } catch { Start-Sleep -Seconds 1 }
+        $r = Invoke-WebRequest -Uri "http://127.0.0.1:13305/api/v1/models" `
+            -UseBasicParsing -TimeoutSec 4
+        Write-Host ("lemond answering host-local (HTTP " + $r.StatusCode + ")")
+        $ok = $true
+        break
+    } catch { }
 }
-throw "lemond started but the API did not answer within 30 s. See $logDir\lemond.err.log"
+if (-not $ok) {
+    throw "lemond did not answer within 60 s -- see logs\lemond.out.log"
+}
+
+# 3. FLM companion service.
+$flm = Join-Path $env:USERPROFILE ".cache\lemonade\bin\flm\npu\flm.exe"
+if (Test-Path $flm) {
+    Start-Process -FilePath $flm `
+        -ArgumentList "serve",$FlmModel,"--host","127.0.0.1","--port",$FlmPort `
+        -WindowStyle Hidden `
+        -RedirectStandardOutput (Join-Path $LogDir "flm.out.log") `
+        -RedirectStandardError (Join-Path $LogDir "flm.err.log")
+    Write-Host "flm serve started ($FlmModel on port $FlmPort)"
+} else {
+    Write-Host "flm backend not installed -- skipping the FLM companion service."
+}
+
+# 4. Relays into WSL (both ports).
+& (Join-Path $Root "host\relay.ps1")
+
+Write-Host ""
+Write-Host "Bridge is up. From WSL:"
+Write-Host "  python3 client\wsl_npu.py doctor"

@@ -73,12 +73,24 @@ Write-Host "Lemonade CLI: $Lemonade"
 
 # --- 3. Backend + models ---------------------------------------------------
 if (-not $SkipModels) {
-    Step "Installing the FastFlowLM NPU backend"
+    # All three NPU backends: a model pull downloads model files ONLY --
+    # loading fails until the matching backend is installed (learned
+    # from a live "RyzenAI-Server failed to start"; see TROUBLESHOOTING).
+    Step "Installing the NPU backends (FLM, Ryzen AI, whisper.cpp)"
     & $Lemonade backends install flm:npu
+    & $Lemonade backends install ryzenai-llm:npu
+    & $Lemonade backends install whispercpp:npu
 
     Step "Pulling default models (LLM: $LlmModel, STT: $SttModel)"
     & $Lemonade pull $LlmModel
     & $Lemonade pull $SttModel
+
+    # FLM keeps its own model store; pull its starter model with flm.
+    $flmExe = Join-Path $env:USERPROFILE ".cache\lemonade\bin\flm\npu\flm.exe"
+    if (Test-Path $flmExe) {
+        Step "Pulling the FLM starter model (llama3.2:1b)"
+        & $flmExe pull llama3.2:1b
+    }
 } else {
     Write-Host "Skipping backend/model setup (-SkipModels)."
 }
