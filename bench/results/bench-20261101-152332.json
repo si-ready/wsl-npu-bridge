@@ -1,0 +1,82 @@
+{
+  "when_utc": "2026-11-02T00:23:00+00:00",
+  "client_version": "0.2.0",
+  "bridge_base_url": "http://127.0.0.1:13305",
+  "flm_base_url": "http://127.0.0.1:53999",
+  "runs_requested": 3,
+  "legs": {
+    "chat-lemond": {
+      "error": "host service error: HTTP 500 from http://127.0.0.1:13305/api/v1/chat/completions: {\"error\":{\"code\":\"model_load_error\",\"message\":\"Failed to load model 'Llama-3.2-1B-Instruct-Hybrid': RyzenAI-Server failed to start\",\"param\":\"model\",\"requested_model\":\"Llama-3.2-1B-Instruct-Hybrid\",\"type\":\"model_load_error\"}}"
+    },
+    "chat-flm": {
+      "summary": {
+        "engine": "flm",
+        "model": "llama3.2:1b",
+        "wall_s_median": 2.055,
+        "tokens_per_s_wall_median": 46.22,
+        "decode_tps_engine_median": 58.311,
+        "prefill_tps_engine_median": 143.827,
+        "ttft_s_engine_median": 0.355
+      },
+      "runs": [
+        {
+          "model": "llama3.2:1b",
+          "engine": "flm",
+          "text": "A neural processing unit (NPU) is well-suited for matrix multiplication due to its ability to perform element-wise multiplications of vectors, which is a fundamental operation in linear algebra. The NPU's architecture allows for efficient parallelization of this operation, making it an ideal candidate for matrix multiplication, where large numbers of multiplications are performed in parallel.",
+          "wall_s": 1.681,
+          "prompt_tokens": 51,
+          "completion_tokens": 71,
+          "prefill_tps": 140.98138435360067,
+          "decode_tps": 56.533973733201044,
+          "ttft_s": 0.361749888,
+          "tokens_per_s": 42.25
+        },
+        {
+          "model": "llama3.2:1b",
+          "engine": "flm",
+          "text": "A neural processing unit (NPU) is good at matrix multiplication because it has a built-in mechanism to learn patterns in the data and represent them as weights and biases in the form of a neural network, allowing it to effectively learn the relationship between inputs and outputs and perform matrix multiplication. This similarity to the way neural networks learn representations in the input space enables the NPU to leverage the power of matrix multiplication to learn and represent complex relationships in the data, making it an ideal candidate for matrix multiplication tasks.",
+          "wall_s": 2.163,
+          "prompt_tokens": 51,
+          "completion_tokens": 101,
+          "prefill_tps": 145.506964066011,
+          "decode_tps": 58.31068742527139,
+          "ttft_s": 0.350498688,
+          "tokens_per_s": 46.69
+        },
+        {
+          "model": "llama3.2:1b",
+          "engine": "flm",
+          "text": "A neural processing unit (NPU) is well-suited for matrix multiplication due to its inherent structure, which is designed to process and transform large amounts of data, such as the weights and activations of neural networks, in a distributed and efficient manner. This allows NPs to leverage the computational power of distributed processing, utilizing multiple processing units (e.g., CPUs, GPUs, or TPUs) to accelerate matrix multiplication, making it a highly efficient algorithm for large-scale computations.",
+          "wall_s": 2.055,
+          "prompt_tokens": 51,
+          "completion_tokens": 95,
+          "prefill_tps": 143.82711615148506,
+          "decode_tps": 58.37604001523922,
+          "ttft_s": 0.354592384,
+          "tokens_per_s": 46.22
+        }
+      ]
+    },
+    "whisper": {
+      "wav": "/mnt/c/Users/casey/AppData/Local/wsl-npu-bridge/bench-sample.wav",
+      "wall_s_median": 2.906,
+      "wall_s_runs": [
+        2.906,
+        2.92,
+        2.85
+      ],
+      "audio_s": 13.192199546485261,
+      "rtf": 4.54,
+      "text": " The quick brown fox jumps over the lazy dog.\n This sample exists so the bridge benchmark can measure\n speech-to-text on the neural processing unit, end-to-end,\n from inside Windows subsystem for Linux.\n"
+    },
+    "embed": {
+      "dims": 768,
+      "wall_s_median": 0.011,
+      "wall_s_runs": [
+        0.158,
+        0.011,
+        0.006
+      ]
+    }
+  }
+}

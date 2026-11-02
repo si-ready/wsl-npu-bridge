@@ -162,9 +162,9 @@ ASUS ProArt PX13, Ryzen AI 9 HX 370, 32 GB, NPU driver 32.0.203.314,
 
 | Path | Result |
 |---|---|
-| Whisper Large v3 Turbo, from WSL | **Works.** 9.0 s clip transcribed in 5.75 s warm (32 s cold, incl. model load); transcript word-perfect |
-| Embeddings (nomic-embed-text-v1, 768 d), from WSL | **Works.** 72.9 s cold (includes lemond auto-pulling the model and auto-installing its backend); warm calls are milliseconds-to-seconds |
-| LLM chat via FastFlowLM (`llama3.2:1b`), from WSL | **Works.** Prefill 103 tok/s (TTFT 0.49 s on a 51-token prompt), decode **55.1 tok/s**, 2.30 s end-to-end |
+| Whisper Large v3 Turbo, from WSL | **Works.** v0.2 bench (median of 3, warmed): 13.2 s clip in **2.91 s — 4.5× real-time**, word-perfect. (v0.1 first run: 9.0 s clip in 5.75 s warm, 32 s cold incl. model load) |
+| Embeddings (nomic-embed-text-v1, 768 d), from WSL | **Works.** Warm median **0.011 s**. First-ever call: 72.9 s (lemond auto-pulled the model and auto-installed its backend) |
+| LLM chat via FastFlowLM (`llama3.2:1b`), from WSL | **Works.** v0.2 bench medians (engine-reported): prefill **143.8 tok/s**, TTFT **0.36 s**, decode **58.3 tok/s**; 46.2 tok/s by the wall clock. (v0.1 single run: prefill 103, decode 55.1 tok/s) |
 | LLM chat via Lemonade hybrid (`Llama-3.2-1B-Instruct-Hybrid`) | **Broken by an upstream defect on this Windows build** — details below |
 
 Two defects found during bring-up, both upstream of this repo, both

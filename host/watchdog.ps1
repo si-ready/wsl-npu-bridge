@@ -59,7 +59,11 @@ if ((Test-Path $flm) -and -not (Test-Local "http://127.0.0.1:$FlmPort/v1/models"
 # 3. relay listeners inside WSL -- but never BOOT WSL just to check:
 # if the distro is not already running, its owner closed it on
 # purpose and the relays are none of our business until it returns.
-$running = (& wsl.exe --list --running 2>$null) -join "`n"
+# wsl.exe --list speaks UTF-16LE; captured raw, the text arrives
+# interleaved with NUL bytes and a plain -match "Ubuntu" fails
+# against it (measured: 104 captured chars, match=False, while the
+# distro was running). Strip the NULs before matching.
+$running = ((& wsl.exe --list --running 2>$null) -join "`n") -replace "`0", ""
 if ($running -notmatch $Distro) { return }
 $ss = (& wsl.exe -d $Distro ss -tln 2>$null) -join "`n"
 $missing = @()
