@@ -213,23 +213,27 @@ see `docs/TROUBLESHOOTING.md`.
 | `wsl/authorize-relay.sh` | One-time WSL-side authorization of that key (convergent, idempotent) |
 | `bench/bench_npu.py` | End-to-end benchmarks (warmup + medians) that file JSON receipts |
 | `tests/` | Hardware-free unittest suite (fake host server) |
+| `bridgekeeper/` | The resident WSL daemon (Rust, zero dependencies): one honest loopback API — aggregated `/health`, SSE chat, embed, transcribe — that fails fast and truthfully when an upstream dies. Its own README + an agent runbook (`AGENTS.md`) live there |
 | `docs/ARCHITECTURE.md` | Layers, transports, and the language-mix design |
+| `docs/WHY-RUST.md` | Why the daemon is Rust — the three-language bake-off record, and when Elixir or C++ would be the right call instead |
 | `docs/TROUBLESHOOTING.md` | The failure modes we've actually hit, and fixes |
 
 ## Roadmap
 
 - **v0.1** — HTTP bridge, hybrid LLM + Whisper + embeddings, receipts. *(shipped)*
 - **v0.2** — production polish: streaming, FLM engine in the client,
-  retries, autostart + watchdog, tests + CI. *(now)*
-- **v0.3** — virtio-vsock transport: no IP networking, no firewall,
+  retries, autostart + watchdog, tests + CI. *(shipped)*
+- **v0.3** — the bridgekeeper: a resident Rust daemon in WSL fronting
+  both services behind one loopback API with truthful health and
+  fail-fast semantics. It earned the place by winning a
+  three-language bake-off (Elixir, Rust, C++) under a black-box
+  chaos battery on the real hardware — see `docs/WHY-RUST.md`. *(now)*
+- **v0.4** — virtio-vsock transport: no IP networking, no firewall,
   two-way gRPC streaming (guest side is already proven — `/dev/vsock`
   is present and openable in current WSL2 kernels; the study's verdict
   is that transports here are chosen for reliability and clean
   cancellation, since inference time dwarfs wire time by orders of
-  magnitude).
-- **v0.4** — Rust data-plane daemon for the vsock channel, token
-  streaming first-class; Elixir control plane evaluated for
-  many-session orchestration (see the architecture study).
+  magnitude). The bridgekeeper is the daemon that would front it.
 
 ## License
 

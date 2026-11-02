@@ -1,0 +1,15 @@
+[package]
+name = "bridgekeeper"
+version = "1.0.0"
+edition = "2021"
+
+# Zero dependencies on purpose: see README.md and docs/WHY-RUST.md
+# in the wsl-npu-bridge repo. The whole daemon is std::net +
+# threads, so the build is one rustc pass, works offline, and there
+# is no supply chain between this file and the binary.
+
+[profile.release]
+opt-level = 3
+lto = true
+strip = true
+panic = "unwind"   # required: handler isolation relies on catch_unwind

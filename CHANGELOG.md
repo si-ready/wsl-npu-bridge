@@ -4,6 +4,38 @@ All notable changes to wsl-npu-bridge. Versions follow
 [semantic versioning](https://semver.org); receipts for every
 performance claim live in `bench/results/`.
 
+## [0.3.0] — 2026-11-01
+
+### Added
+- **bridgekeeper** (`bridgekeeper/`): a resident WSL daemon in Rust
+  with zero dependencies that fronts Lemonade + FastFlowLM behind
+  one loopback API on `127.0.0.1:14112` — aggregated `/health`
+  (poll-based, pre-bind first probe), SSE `/chat`, `/embed`,
+  `/transcribe`. Handler isolation via `catch_unwind`, bounded
+  timeouts on every socket, a 128-connection saturation cap with
+  fast 503s, env-only configuration, and unit tests that gate the
+  build (`cargo test` in `build.sh`).
+- **Fail-fast semantics measured, not asserted:** an upstream
+  known to be down is refused without dialing; a request that
+  dials inside the health poller's ~2 s blind window gets a 1.8 s
+  header fuse, after which the poller arbitrates — down → 502,
+  alive-but-cold → patient retry. Dead-Lemonade embed: **502 in
+  1.83 s** under the bake-off battery (the contract bound is 2 s).
+- The daemon was adopted by race, not by preference: Elixir/BEAM,
+  Rust, and C++ implementations of the same contract ran a
+  black-box battery (correctness, latency vs direct, 8-way
+  concurrency, per-upstream kills, `kill -9`, 480 s soak) on the
+  reference machine; the production build then ran it as a fourth
+  contestant and posted the only fully clean card (correctness
+  4/4, all chaos lines passed, soak 0 errors / 0 hangs, 2.7 MB
+  idle RSS). Comparative record: `docs/WHY-RUST.md`; raw receipts
+  and all three contestants: the SuperInstance
+  `bridgekeeper-bakeoff` repository.
+- `bridgekeeper/AGENTS.md`: an agent-facing runbook — mission
+  invariants, an executable verify sequence, a failure-signature
+  → remedy table from the failures actually observed, and the
+  rules for modifying the daemon safely.
+
 ## [0.2.0] — 2026-11-01
 
 ### Added
