@@ -28,4 +28,4 @@ jobs:
         working-directory: bridgekeeper
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo publish
+        run: cargo publish --allow-dirty  # the runner cargo refreshes Cargo.lock format, dirtying the tree
