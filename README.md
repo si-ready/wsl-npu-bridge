@@ -176,10 +176,12 @@ documented with evidence in `docs/TROUBLESHOOTING.md`:
    API version [23] is not available… Current ORT Version is:
    1.17.1"*. Machines whose Windows ML runtime is newer may not hit
    this; the hybrid path needs no bridge changes when it heals.
+   Filed upstream: [lemonade#4038](https://github.com/lemonade-sdk/lemonade/issues/4038).
 2. **Lemonade's FLM model discovery fails** in the 2026.44.1
-   embeddable build (JSON parse error on `flm list --json` output),
-   so FLM models can't be served *through* lemond yet — hence the
-   companion `flm serve` in v0.1.
+   embeddable build (JSON parse error after a successful
+   `flm list --json`), so FLM models can't be served *through*
+   lemond yet — hence the companion `flm serve`. Filed upstream:
+   [lemonade#4039](https://github.com/lemonade-sdk/lemonade/issues/4039).
 
 Also disclosed: the first bench receipt
 (`bench-20261101-144554.json`) reports a nonsense Whisper RTF of

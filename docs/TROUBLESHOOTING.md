@@ -59,6 +59,8 @@ Never debug a half-dead stack — restart it cleanly.
 
 ## Chat: "RyzenAI-Server failed to start" (HTTP 500 from /load)
 
+*Upstream: [lemonade-sdk/lemonade#4038](https://github.com/lemonade-sdk/lemonade/issues/4038).*
+
 Run the backend binary by hand and read its stderr — lemond only
 reports that it failed. On the reference machine
 (Windows 11 build 26300) the binary dies with:
@@ -86,6 +88,9 @@ backends; manually: `lemonade backends install ryzenai-llm:npu`
 (and `flm:npu`, `whispercpp:npu`).
 
 ## FLM models don't appear in lemond's model list
+
+*Upstream: [lemonade-sdk/lemonade#4039](https://github.com/lemonade-sdk/lemonade/issues/4039)
+(related, different signature: #2001).*
 
 Known defect in the Lemonade 2026.44.1 embeddable build: startup logs
 
