@@ -4,6 +4,22 @@ All notable changes to wsl-npu-bridge. Versions follow
 [semantic versioning](https://semver.org); receipts for every
 performance claim live in `bench/results/`.
 
+## [0.3.1] — 2026-11-01
+
+### Added
+- **CI/CD deployment, all in GitHub.** CI now builds the
+  bridgekeeper (`cargo test` as the gate + release build) on every
+  push. A new release workflow turns any `v*` tag into a published
+  GitHub Release automatically: gates run, the bridgekeeper binary
+  is built and attached with its sha256 — no manual steps, no local
+  builds. A user without a Rust toolchain can now fetch the daemon
+  prebuilt from the release page and verify it.
+
+### Unchanged
+- Everything else. No functional changes to the client, the host
+  scripts, or the bridgekeeper — this release is delivery
+  machinery around a finished tool, deliberately.
+
 ## [0.3.0] — 2026-11-01
 
 ### Added

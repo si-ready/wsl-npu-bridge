@@ -1,0 +1,71 @@
+name: release
+
+# Tag a version (git tag vX.Y.Z && git push origin vX.Y.Z) and this
+# pipeline does the rest: the functional gates run, the bridgekeeper
+# is built, and a GitHub Release is published with the binary and
+# its sha256 attached. No manual steps, no local builds.
+#
+# The analyzer/lint gates (PSScriptAnalyzer, shellcheck, the ASCII
+# check) live in ci.yml and run on every push to main -- a tag is
+# only ever cut from a green main, so they are not repeated here.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    name: gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Client unit tests
+        run: python -m unittest discover -s tests
+      - name: Bridgekeeper unit tests
+        working-directory: bridgekeeper
+        run: cargo test --release
+
+  build:
+    name: build bridgekeeper
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Release build
+        working-directory: bridgekeeper
+        run: cargo build --release
+      - name: Stage the asset and its checksum
+        run: |
+          mkdir -p dist
+          cp bridgekeeper/target/release/bridgekeeper dist/bridgekeeper-x86_64-linux
+          cd dist && sha256sum bridgekeeper-x86_64-linux > bridgekeeper-x86_64-linux.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bridgekeeper-bin
+          path: dist/
+
+  release:
+    name: publish the GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: bridgekeeper-bin
+          path: dist
+      - name: Create the release with the binary attached
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "${GITHUB_REF_NAME}"
+          dist/bridgekeeper-x86_64-linux
+          dist/bridgekeeper-x86_64-linux.sha256
+          --repo "${GITHUB_REPOSITORY}"
+          --title "${GITHUB_REF_NAME}"
+          --generate-notes
