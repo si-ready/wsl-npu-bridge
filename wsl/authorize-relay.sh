@@ -18,7 +18,7 @@ for candidate in /mnt/c/Users/*/AppData/Local/wsl-npu-bridge/authorized-line.txt
 done
 if [ -z "$LINE_FILE" ]; then
     echo "authorized-line.txt not found under any Windows profile." >&2
-    echo "Run host\\relay.ps1 (or host\\serve.ps1) on Windows first --" >&2
+    printf '%s\n' 'Run host\relay.ps1 (or host\serve.ps1) on Windows first --' >&2
     echo "it generates the key and writes that file." >&2
     exit 1
 fi

@@ -86,10 +86,20 @@ if (-not $SkipModels) {
     & $Lemonade pull $SttModel
 
     # FLM keeps its own model store; pull its starter model with flm.
+    # One retry: a transient network error here once left a machine
+    # with everything installed except the FLM model, and the failure
+    # scrolled past unnoticed. A persistent failure now warns loudly.
     $flmExe = Join-Path $env:USERPROFILE ".cache\lemonade\bin\flm\npu\flm.exe"
     if (Test-Path $flmExe) {
         Step "Pulling the FLM starter model (llama3.2:1b)"
         & $flmExe pull llama3.2:1b
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "FLM pull failed (exit $LASTEXITCODE); retrying once..."
+            & $flmExe pull llama3.2:1b
+        }
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "FLM starter model did not download. The Lemonade paths still work; re-run install.ps1 later, or run:  & `"$flmExe`" pull llama3.2:1b"
+        }
     }
 } else {
     Write-Host "Skipping backend/model setup (-SkipModels)."

@@ -69,7 +69,12 @@ for ($i = 0; $i -lt 15; $i++) {
         Write-Host ("lemond answering host-local (HTTP " + $r.StatusCode + ")")
         $ok = $true
         break
-    } catch { }
+    } catch {
+        # Not up yet -- the loop retries; the throw after the loop is
+        # the failure report. (Kept non-empty for the analyzer, and
+        # because a silently swallowed error bit us once already.)
+        Write-Verbose "poll $($i + 1): $($_.Exception.Message)"
+    }
 }
 if (-not $ok) {
     throw "lemond did not answer within 60 s -- see logs\lemond.out.log"

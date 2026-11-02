@@ -16,7 +16,6 @@ $ErrorActionPreference = "Continue"
 $Root = Join-Path $env:LOCALAPPDATA "wsl-npu-bridge"
 $LogDir = Join-Path $Root "logs"
 $Log = Join-Path $LogDir "watchdog.log"
-$Bin = Join-Path $Root "lemonade\lemonade-embeddable-2026.44.1-windows-x64"
 $FlmPort = 53999
 $Distro = "Ubuntu"
 

@@ -34,6 +34,7 @@ jobs:
         shell: pwsh
         run: |
           $findings = Invoke-ScriptAnalyzer -Path host -Recurse `
+            -Settings PSScriptAnalyzerSettings.psd1 `
             -Severity @('Error','Warning')
           $findings | Format-Table -AutoSize | Out-String | Write-Host
           if ($findings) { exit 1 }
