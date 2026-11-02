@@ -108,6 +108,16 @@ $synth.Speak("The quick brown fox jumps over the lazy dog. " +
 $synth.Dispose()
 Write-Host "Wrote $wav"
 
+# --- 5. Install the host scripts next to the data -------------------------
+# serve.ps1 / relay.ps1 / watchdog.ps1 resolve each other under
+# %LOCALAPPDATA%\wsl-npu-bridge\host\, so autostart and the watchdog
+# keep working even if the git clone moves or is deleted.
+Step "Installing host scripts to $Root\host"
+$hostDest = Join-Path $Root "host"
+New-Item -ItemType Directory -Force -Path $hostDest | Out-Null
+Copy-Item (Join-Path $PSScriptRoot "*.ps1") $hostDest -Force
+
 Step "Done"
 Write-Host "Start the service with:  host\serve.ps1"
+Write-Host "Make it permanent with:  host\install-autostart.ps1"
 Write-Host "Then, inside WSL:        python3 client\wsl_npu.py doctor"

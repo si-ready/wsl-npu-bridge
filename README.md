@@ -1,5 +1,9 @@
 # wsl-npu-bridge
 
+[![CI](https://github.com/si-ready/wsl-npu-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/si-ready/wsl-npu-bridge/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/si-ready/wsl-npu-bridge)](https://github.com/si-ready/wsl-npu-bridge/releases)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+
 **Use your Ryzen AI NPU from inside WSL2.**
 
 Your laptop has a neural processing unit. Your Linux environment can't
@@ -11,9 +15,12 @@ accelerator:
 ```python
 from wsl_npu import NPU
 
-npu = NPU()                                # finds the host by itself
-print(npu.chat("Explain tensor cores"))    # LLM on the NPU (+ iGPU decode)
-text = npu.transcribe("standup.wav")       # Whisper, off your CPU entirely
+npu = NPU()                                      # finds the host by itself
+print(npu.chat("Explain tensor cores"))          # hybrid LLM (NPU + iGPU)
+print(npu.chat("Explain tensor cores", engine="flm"))  # FastFlowLM on the NPU
+for delta in npu.chat_stream("Tell me a story", engine="flm"):
+    print(delta, end="")                         # streamed tokens
+text = npu.transcribe("standup.wav")             # Whisper, off your CPU entirely
 ```
 
 - **LLM chat** through AMD's *hybrid* execution, which partitions
@@ -24,11 +31,14 @@ text = npu.transcribe("standup.wav")       # Whisper, off your CPU entirely
   (tokens/sec, real-time factor) so "runs on the NPU" is a measurement,
   not a claim.
 
-Status: **v0.1.** Verified end-to-end on an ASUS ProArt PX13
+Status: **v0.2.** Verified end-to-end on an ASUS ProArt PX13
 (Ryzen AI 9 HX 370, Windows 11 build 26300, WSL2 NAT mode).
 Receipts live in `bench/results/`; the measured results — including
 the two upstream defects that shape this release — are in
 [Measured results](#measured-results-reference-machine) below.
+New in 0.2: streaming chat, FastFlowLM as a first-class client
+engine, transport retries, a median-of-N bench, autostart +
+watchdog for the host stack, and a hardware-free test suite in CI.
 
 ---
 
@@ -83,7 +93,7 @@ future WSL release instead of fighting them.
   resolv.conf nameserver) remains as a fallback for setups that
   prefer it. Mirrored networking mode makes the relay unnecessary —
   see `docs/ARCHITECTURE.md`, which also records the transport study
-  behind these choices and the v0.2 virtio-vsock plan.
+  behind these choices and the virtio-vsock plan.
 
 ## Quick start (10 minutes)
 
@@ -103,7 +113,14 @@ bash wsl/authorize-relay.sh             # authorizes the bridge's restricted rel
 ```
 
 Then re-run `host\serve.ps1` on Windows (or `host\relay.ps1` if the
-services are already up), and:
+services are already up). To make the bridge permanent — start at
+every logon, health-checked every 5 minutes, self-healing:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File host\install-autostart.ps1   # -Remove undoes it
+```
+
+And from WSL:
 
 ```bash
 python3 client/wsl_npu.py doctor        # checks both endpoints + model readiness
@@ -111,17 +128,18 @@ python3 client/wsl_npu.py transcribe some-audio.wav
 python3 bench/bench_npu.py              # numbers + a filed JSON receipt
 ```
 
-LLM chat works two ways in v0.1:
+LLM chat works two ways, both through the one client
+(`--engine flm` or `--engine lemond`, streaming with `--stream`):
 
-- **Via FastFlowLM** (the path verified end-to-end): the FLM
-  companion endpoint at `http://127.0.0.1:53999` is a standard
-  OpenAI-compatible API — point any OpenAI client at it, model
-  `llama3.2:1b`.
-- **Via Lemonade hybrid models** (`client/wsl_npu.py chat …`):
-  works when the machine's Windows ML / ONNX Runtime stack cooperates;
-  on the reference machine's Windows build it currently does not —
-  see Measured results. This is an upstream defect, not a bridge one,
-  and the bridge is structured so the fix lights the path up with no
+- **Via FastFlowLM** (the path verified end-to-end): FLM models on
+  the NPU, via the companion endpoint — also a standard
+  OpenAI-compatible API at `http://127.0.0.1:53999` for any other
+  client, model `llama3.2:1b`.
+- **Via Lemonade hybrid models**: works when the machine's
+  Windows ML / ONNX Runtime stack cooperates; on the reference
+  machine's Windows build it currently does not — see Measured
+  results. This is an upstream defect, not a bridge one, and the
+  bridge is structured so the fix lights the path up with no
   changes here.
 
 Defaults: LLM `Llama-3.2-1B-Instruct-Hybrid` (NPU+iGPU), STT
@@ -184,25 +202,30 @@ see `docs/TROUBLESHOOTING.md`.
 
 | Path | What it is |
 |---|---|
-| `client/wsl_npu.py` | The WSL-side client library + CLI (stdlib only) |
-| `host/install.ps1` | One-time host setup: hardware gate, pinned install, backends, models |
+| `client/wsl_npu.py` | The WSL-side client library + CLI (stdlib only; chat, streaming, FLM engine, transcribe, embed, doctor) |
+| `host/install.ps1` | One-time host setup: hardware gate, pinned install, backends, models, script install |
 | `host/serve.ps1` | Start/stop the whole stack (services first, verified, then relays) |
 | `host/relay.ps1` | The SSH reverse relays + the dedicated restricted key |
+| `host/watchdog.ps1` | Single-pass health check + conservative repair (run by the scheduler) |
+| `host/install-autostart.ps1` | Logon start + 5-minute watchdog as user-level Scheduled Tasks |
 | `wsl/authorize-relay.sh` | One-time WSL-side authorization of that key (convergent, idempotent) |
-| `bench/bench_npu.py` | End-to-end benchmarks that file JSON receipts |
+| `bench/bench_npu.py` | End-to-end benchmarks (warmup + medians) that file JSON receipts |
+| `tests/` | Hardware-free unittest suite (fake host server) |
 | `docs/ARCHITECTURE.md` | Layers, transports, and the language-mix design |
 | `docs/TROUBLESHOOTING.md` | The failure modes we've actually hit, and fixes |
 
 ## Roadmap
 
-- **v0.1** — HTTP bridge, hybrid LLM + Whisper + embeddings, receipts. *(now)*
-- **v0.2** — virtio-vsock transport: no IP networking, no firewall,
+- **v0.1** — HTTP bridge, hybrid LLM + Whisper + embeddings, receipts. *(shipped)*
+- **v0.2** — production polish: streaming, FLM engine in the client,
+  retries, autostart + watchdog, tests + CI. *(now)*
+- **v0.3** — virtio-vsock transport: no IP networking, no firewall,
   two-way gRPC streaming (guest side is already proven — `/dev/vsock`
   is present and openable in current WSL2 kernels; the study's verdict
   is that transports here are chosen for reliability and clean
   cancellation, since inference time dwarfs wire time by orders of
   magnitude).
-- **v0.3** — Rust data-plane daemon for the vsock channel, token
+- **v0.4** — Rust data-plane daemon for the vsock channel, token
   streaming first-class; Elixir control plane evaluated for
   many-session orchestration (see the architecture study).
 

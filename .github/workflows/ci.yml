@@ -1,0 +1,55 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  python:
+    name: client + bench (stdlib unittest)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Byte-compile everything
+        run: python -m compileall -q client bench tests
+      - name: Run tests
+        run: python -m unittest discover -s tests -v
+
+  powershell:
+    name: host scripts (PSScriptAnalyzer)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install PSScriptAnalyzer
+        shell: pwsh
+        run: Install-Module PSScriptAnalyzer -Force -Scope CurrentUser
+      - name: Analyze host scripts
+        shell: pwsh
+        run: |
+          $findings = Invoke-ScriptAnalyzer -Path host -Recurse `
+            -Severity @('Error','Warning')
+          $findings | Format-Table -AutoSize | Out-String | Write-Host
+          if ($findings) { exit 1 }
+      - name: ASCII check (PowerShell 5.1 reads BOM-less files as ANSI)
+        shell: pwsh
+        run: |
+          $bad = Get-ChildItem host -Filter *.ps1 | Where-Object {
+            (Get-Content $_.FullName -Raw) -match '[^\x00-\x7F]' }
+          if ($bad) { $bad | ForEach-Object { Write-Host "NON-ASCII: $($_.Name)" }; exit 1 }
+
+  shell:
+    name: wsl script (shellcheck)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shellcheck
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          shellcheck wsl/authorize-relay.sh
