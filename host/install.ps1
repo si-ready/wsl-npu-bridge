@@ -125,7 +125,26 @@ Write-Host "Wrote $wav"
 Step "Installing host scripts to $Root\host"
 $hostDest = Join-Path $Root "host"
 New-Item -ItemType Directory -Force -Path $hostDest | Out-Null
-Copy-Item (Join-Path $PSScriptRoot "*.ps1") $hostDest -Force
+# $PSScriptRoot can be EMPTY when the script is launched through
+# some hosts (observed: powershell.exe -File via WSL interop) --
+# and Join-Path "" "*.ps1" then silently resolves relative to the
+# working directory, where the wildcard matches nothing and
+# Copy-Item succeeds at copying zero files. Resolve defensively
+# and verify the copy landed; never no-op silently.
+$scriptDir = $PSScriptRoot
+if (-not $scriptDir -and $PSCommandPath) {
+    $scriptDir = Split-Path -Parent $PSCommandPath
+}
+if (-not $scriptDir) {
+    throw "Cannot determine this script's folder (\$PSScriptRoot is empty). Run install.ps1 directly: powershell -File <repo>\host\install.ps1"
+}
+$sources = Get-ChildItem (Join-Path $scriptDir "*.ps1")
+Copy-Item $sources.FullName $hostDest -Force
+$landed = Get-ChildItem (Join-Path $hostDest "*.ps1")
+if ($landed.Count -lt $sources.Count) {
+    throw "Host script copy looks incomplete: $($sources.Count) source(s), $($landed.Count) in $hostDest"
+}
+Write-Host ("Installed " + $sources.Count + " host scripts.")
 
 Step "Done"
 Write-Host "Start the service with:  host\serve.ps1"
