@@ -5,11 +5,14 @@ name: publish-crate
 # workflow proves it is this repository and crates.io issues a
 # short-lived token for the run.
 #
-# One-time setup (crates.io account owner): on crates.io, add a
-# Trusted Publisher for the crate "bridgekeeper" with owner
-# "si-ready", repository "wsl-npu-bridge", workflow
-# "publish-crate.yml". Until that exists, this workflow fails at
-# the auth step and publishes nothing.
+# One-time setup (crates.io account owner): a Trusted Publisher
+# can only be registered on a crate that already exists, so the
+# first version goes out via publish-bootstrap.yml (API token,
+# revoked the same day). Once the crate exists, open its page on
+# crates.io -> Settings -> Trusted Publishing and add a GitHub
+# publisher: owner "si-ready", repository "wsl-npu-bridge",
+# workflow "publish-crate.yml". Until that exists, this workflow
+# fails at the auth step and publishes nothing.
 #
 # Manual by design: run it from the Actions tab when a crate
 # version is meant to go out. The crate version lives in
