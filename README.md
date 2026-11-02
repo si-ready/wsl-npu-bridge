@@ -26,7 +26,8 @@ text = npu.transcribe("standup.wav")             # Whisper, off your CPU entirel
 - **LLM chat** through AMD's *hybrid* execution, which partitions
   work across the NPU and the Radeon iGPU per phase — at a few watts,
   while your discrete GPU and CPU stay free.
-- **Speech-to-text** with Whisper backends that probe for the NPU first.
+- **Speech-to-text** with Whisper backends that probe for the NPU first
+  (AMD's NPU offload for Whisper is the encoder, Ryzen AI docs §3.8).
 - **Embeddings**, plus a bench tool that files dated JSON receipts
   (tokens/sec, real-time factor) so "runs on the NPU" is a measurement,
   not a claim.
@@ -146,14 +147,22 @@ Defaults: LLM `Llama-3.2-1B-Instruct-Hybrid` (NPU+iGPU), STT
 `Whisper-Large-v3-Turbo`, embeddings `nomic-embed-text-v1-GGUF`.
 Override with `--model` or `$WSL_NPU_LLM` / `$WSL_NPU_STT` /
 `$WSL_NPU_EMBED`. Bigger hybrid models (3B/7B/8B) are a `lemonade pull`
-away on the host.
+away on the host — with two cautions from AMD's docs: hybrid models are
+release-coupled (a model published for an earlier Ryzen AI release is
+not compatible with a newer runtime; after a Lemonade/Ryzen AI update,
+re-pull hybrid models before debugging anything), and long contexts
+are hungry (a 4B hybrid model at 64K–128K context can consume
+20–30 GB of RAM, Ryzen AI 1.9.0 docs §3.14 — a real cliff on a
+32 GB machine).
 
 ## Requirements
 
 - A Ryzen AI 300/400-series machine (XDNA 2 NPU) — Strix Point and up
 - Windows 11 with WSL2 (either networking mode), Python 3.10+ in WSL
 - AMD NPU driver 32.0.203.314 or newer recommended
-  (`install.ps1` checks and warns)
+  (`install.ps1` checks and warns). AMD's documented minimum for the
+  current execution provider is 32.0.203.280 (Ryzen AI 1.9.0 docs,
+  EP/driver table §3.7.1); 314 is this bridge's tested floor.
 
 ## Measured results (reference machine)
 
@@ -177,11 +186,20 @@ documented with evidence in `docs/TROUBLESHOOTING.md`:
    1.17.1"*. Machines whose Windows ML runtime is newer may not hit
    this; the hybrid path needs no bridge changes when it heals.
    Filed upstream: [lemonade#4038](https://github.com/lemonade-sdk/lemonade/issues/4038).
+   AMD's own documentation puts this build inside the supported
+   envelope — Ryzen AI 1.9.0 lists Windows 11 build 26100 or newer as
+   its prerequisite (§3.2.1) — so this is an upstream defect on a
+   supported configuration, not an unsupported-machine quirk.
 2. **Lemonade's FLM model discovery fails** in the 2026.44.1
    embeddable build (JSON parse error after a successful
    `flm list --json`), so FLM models can't be served *through*
    lemond yet — hence the companion `flm serve`. Filed upstream:
    [lemonade#4039](https://github.com/lemonade-sdk/lemonade/issues/4039).
+   Both pieces are AMD-documented, not hacks: FastFlowLM is an
+   official Ryzen AI execution mode ("NPU-first runtime built
+   exclusively for Ryzen AI", Ryzen AI 1.9.0 docs, execution-mode
+   table) and Lemonade is AMD's documented server interface
+   (§§3.11–3.12). Only Lemonade's *discovery* of FLM is broken.
 
 Also disclosed: the first bench receipt
 (`bench-20261101-144554.json`) reports a nonsense Whisper RTF of

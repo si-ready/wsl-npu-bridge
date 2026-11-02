@@ -21,8 +21,9 @@ Every design decision below is downstream of that split.
 ## Execution: hybrid is the interesting part
 
 AMD's "hybrid" models split one inference across two engines. The
-popular shorthand — *NPU does prefill, iGPU does decode* — is
-Lemonade's simplification; AMD's own description is that the runtime
+popular shorthand — *NPU does prefill, iGPU does decode* — is one
+AMD itself uses for hybrid model *generation* (Ryzen AI docs
+§3.15.2); the runtime mechanism underneath it is that the runtime
 **partitions layers and operations across the NPU and iGPU per
 phase**, with the NPU carrying the compute-dense work it is built for
 at a few watts and the iGPU carrying the memory-bound work where its
