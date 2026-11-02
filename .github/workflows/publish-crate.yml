@@ -1,0 +1,41 @@
+name: publish-crate
+
+# Publishes the bridgekeeper crate to crates.io using Trusted
+# Publishing (GitHub OIDC) -- no API key is stored anywhere; the
+# workflow proves it is this repository and crates.io issues a
+# short-lived token for the run.
+#
+# One-time setup (crates.io account owner): on crates.io, add a
+# Trusted Publisher for the crate "bridgekeeper" with owner
+# "si-ready", repository "wsl-npu-bridge", workflow
+# "publish-crate.yml". Until that exists, this workflow fails at
+# the auth step and publishes nothing.
+#
+# Manual by design: run it from the Actions tab when a crate
+# version is meant to go out. The crate version lives in
+# bridgekeeper/Cargo.toml and is independent of the repo's tags.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  publish:
+    name: test, then publish to crates.io
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unit tests (the build gate)
+        working-directory: bridgekeeper
+        run: cargo test --release
+      - name: Authenticate to crates.io (OIDC)
+        id: auth
+        uses: rust-lang/crates-io-auth-action@v1
+      - name: Publish
+        working-directory: bridgekeeper
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        run: cargo publish

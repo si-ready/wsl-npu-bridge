@@ -2,6 +2,12 @@
 name = "bridgekeeper"
 version = "1.0.0"
 edition = "2021"
+description = "Zero-dependency resident daemon fronting the WSL NPU bridge (Lemonade + FastFlowLM) behind one honest loopback API with fail-fast upstream health semantics."
+license = "Apache-2.0"
+repository = "https://github.com/si-ready/wsl-npu-bridge"
+homepage = "https://github.com/si-ready/wsl-npu-bridge/tree/main/bridgekeeper"
+keywords = ["daemon", "proxy", "wsl", "npu", "sse"]
+categories = ["network-programming", "command-line-utilities"]
 
 # Zero dependencies on purpose: see README.md and docs/WHY-RUST.md
 # in the wsl-npu-bridge repo. The whole daemon is std::net +
