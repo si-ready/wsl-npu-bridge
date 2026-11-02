@@ -86,6 +86,20 @@ through the `windows` crate (there is no tokio-vsock for AF_HYPERV);
 sizing that work is an explicit open item, to be answered by a spike,
 not by optimism.
 
+**Spike result (2026-11-01, reference machine, measured):** a
+no-admin, no-registry test settles the conflicts. A Windows-side
+`AF_HYPERV` listener (raw Winsock via a few lines of C#; protocol
+must be `HV_PROTOCOL_RAW`) bound to the **specific** WSL VmId from
+`wslinfo --vm-id` and a service GUID of the standard vsock form
+`{port}-facb-11e6-bd58-64006a7986d3` accepted a guest `AF_VSOCK`
+connection to CID 2 and round-tripped a payload — no elevation, no
+registry registration. The **wildcard** VmId bind was also tested:
+the guest times out and nothing is ever accepted, confirming the
+VcXsrv report. Design consequence for any vsock transport: the
+VmId changes every WSL restart, so the channel needs a discovery
+step (the guest knows its VmId; the SSH relay can bootstrap it
+once) — budget for that, not for admin or registration.
+
 ### 3. NAT-mode gateway TCP (fallback)
 
 The v0.1 bring-up path: service bound beyond loopback, client
